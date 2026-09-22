@@ -23,7 +23,7 @@ class ApiServer:
     async def health(self, request: web.Request) -> web.Response:
         return web.json_response({
             'status': 'ok',
-            'version': os.environ.get('APP_VERSION', '0.1.2'),
+            'version': os.environ.get('APP_VERSION', '0.1.3'),
             'ha_connected': self.analyzer.ha_connected,
         })
 

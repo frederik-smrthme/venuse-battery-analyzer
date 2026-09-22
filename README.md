@@ -2,7 +2,7 @@
 
 A local Home Assistant analyzer for **Marstek Venus E / LFP batteries**. The project observes the upper charging range, charge stop, relaxation and BMS balancing behavior and exposes the analysis as native Home Assistant entities.
 
-> **Development status:** v0.1.2 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
+> **Development status:** v0.1.3 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
 
 ## What it is for
 
@@ -83,7 +83,7 @@ BALANCING is tracked independently as an ON/OFF signal and may overlap REST or P
 Cycles without a balancing flag are intentionally retained because they provide a useful reference for natural LFP relaxation.
 
 
-## v0.1.2 validation and plausibility safeguards
+## v0.1.3 validation and plausibility safeguards
 
 Before the first live test the analyzer was hardened with the following checks:
 
@@ -224,7 +224,7 @@ The currently reported Marstek `Vmin` and `Vmax` can then remain as independent 
 
 ## Planned analysis extensions
 
-Not yet implemented in v0.1.2:
+Not yet implemented in v0.1.3:
 
 - InfluxDB history and replay adapter
 - robust slope calculation / regression over time windows
@@ -247,7 +247,7 @@ The analyzer is intentionally event-driven and lightweight for a Raspberry Pi 4 
 
 ## Safety
 
-Version 0.1.2 is strictly **read-only / observation-only**. It does not control charging, discharging, force mode, power limits or BMS settings.
+Version 0.1.3 is strictly **read-only / observation-only**. It does not control charging, discharging, force mode, power limits or BMS settings.
 
 ## Repository structure
 

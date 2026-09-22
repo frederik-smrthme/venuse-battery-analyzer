@@ -1,5 +1,15 @@
 # Changelog
 
+
+## 0.1.3
+
+- Replaced the obsolete Home Assistant `watchdog` app setting with a native Docker `HEALTHCHECK` against `/health`.
+- Removed redundant `startup` and `boot` settings that only repeated Home Assistant defaults.
+- Sorted integration manifest keys as required by Hassfest.
+- Updated GitHub Actions to current Node 24 based checkout/setup actions and pinned Ubuntu 24.04 runners.
+- Tightened configurable LFP plausibility bounds to 2.0–3.8 V for cell voltage limits.
+- No battery-control behavior added; the analyzer remains read-only.
+
 ## 0.1.2
 
 - Corrected Home Assistant manifest type to `service` and enforced a single config entry.

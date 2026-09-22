@@ -759,7 +759,7 @@ class Analyzer:
         else:
             cell_source = 'partial_individual'
         return {
-            'version': __import__('os').environ.get('APP_VERSION', '0.1.2'),
+            'version': __import__('os').environ.get('APP_VERSION', '0.1.3'),
             'schema_version': 2,
             'phase': self.phase,
             'analysis_state': analysis_state,

@@ -27,7 +27,7 @@ The app exposes a read-only JSON API on port 8099 by default:
 The app does not alter charging or battery control settings. It is observation-only.
 
 
-## Important v0.1.2 behavior
+## Important v0.1.3 behavior
 
 - Charge-stop time is the start of the stable-zero window; confirmation occurs after the configured stability interval.
 - Balancing is an independent signal and may span multiple ON/OFF sessions in one cycle.

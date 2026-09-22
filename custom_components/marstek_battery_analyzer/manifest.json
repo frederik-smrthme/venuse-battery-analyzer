@@ -1,15 +1,15 @@
 {
   "domain": "marstek_battery_analyzer",
   "name": "Marstek Battery Analyzer",
-  "version": "0.1.2",
-  "config_flow": true,
-  "single_config_entry": true,
-  "documentation": "https://github.com/frederik-smrthme/venuse-battery-analyzer",
-  "issue_tracker": "https://github.com/frederik-smrthme/venuse-battery-analyzer/issues",
   "codeowners": [
     "@frederik-smrthme"
   ],
+  "config_flow": true,
+  "documentation": "https://github.com/frederik-smrthme/venuse-battery-analyzer",
   "integration_type": "service",
   "iot_class": "local_polling",
-  "requirements": []
+  "issue_tracker": "https://github.com/frederik-smrthme/venuse-battery-analyzer/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.3"
 }
