@@ -11,6 +11,9 @@
     },
     "error": {
       "cannot_connect": "Verbindung zur Analyzer-App nicht moeglich."
+    },
+    "abort": {
+      "already_configured": "Der Analyzer ist bereits konfiguriert."
     }
   }
 }

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from datetime import datetime
@@ -36,8 +35,10 @@ class HomeAssistantClient:
                 await self._run_once()
                 backoff = 1
             except asyncio.CancelledError:
+                self.analyzer.set_connection_state(False)
                 raise
             except Exception as exc:
+                self.analyzer.set_connection_state(False)
                 LOGGER.exception('Home Assistant websocket failed: %s', exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
@@ -62,6 +63,7 @@ class HomeAssistantClient:
                         if not msg.get('success'):
                             raise RuntimeError(f'get_states failed: {msg}')
                         self.analyzer.set_initial_states(msg.get('result') or [])
+                        self.analyzer.set_connection_state(True)
                         self.analyzer.evaluate(utcnow())
                         break
 
@@ -80,8 +82,8 @@ class HomeAssistantClient:
                     entity_id = data.get('entity_id')
                     if entity_id not in self.settings.watched_entities:
                         continue
-                    new_state = data.get('new_state') or {}
-                    state = new_state.get('state')
+                    new_state = data.get('new_state')
+                    state = (new_state or {}).get('state') if new_state is not None else None
                     time_fired = event.get('time_fired')
                     ts = None
                     if time_fired:

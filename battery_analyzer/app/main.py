@@ -26,6 +26,9 @@ async def ticker(analyzer: Analyzer) -> None:
 
 async def main() -> None:
     settings = Settings.load()
+    for warning in settings.validation_warnings():
+        LOGGER.warning('Configuration plausibility warning: %s', warning)
+
     db = Database()
     analyzer = Analyzer(settings, db)
     ha = HomeAssistantClient(settings, analyzer)
@@ -45,10 +48,13 @@ async def main() -> None:
         settings.battery_dod_percent,
     )
 
-    await asyncio.gather(
-        ha.run_forever(),
-        ticker(analyzer),
-    )
+    try:
+        await asyncio.gather(
+            ha.run_forever(),
+            ticker(analyzer),
+        )
+    finally:
+        db.close()
 
 
 if __name__ == '__main__':

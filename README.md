@@ -1,12 +1,8 @@
 # Marstek Battery Analyzer
 
-**Disclaimer**
-
-This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of functionality, fitness for a particular purpose, or non-infringement.Use at your own risk. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
-
 A local Home Assistant analyzer for **Marstek Venus E / LFP batteries**. The project observes the upper charging range, charge stop, relaxation and BMS balancing behavior and exposes the analysis as native Home Assistant entities.
 
-> **Development status:** v0.1.0 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
+> **Development status:** v0.1.1 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
 
 ## What it is for
 
@@ -23,7 +19,7 @@ The analyzer is intended to build a reliable long-term picture of battery behavi
 - future estimation of balancing current
 - future capacity / SoH analysis
 
-The current data source provides only minimum and maximum cell voltage. The internal data model is deliberately prepared for **all 16 individual cell voltages** when these become available later.
+The current Marstek data source provides only minimum and maximum cell voltage. The internal data model is deliberately prepared for **all 16 individual cell voltages** when these become available later.
 
 ## Architecture
 
@@ -50,6 +46,7 @@ Marstek / OmniBattery entities
                     native HA entities
 ```
 
+No MQTT and no external server are required.
 
 ## Battery defaults
 
@@ -77,22 +74,46 @@ NORMAL
   -> OBSERVATION        SoC >= 97%
   -> TOP_CHARGE         SoC >= 99% or configured high-cell threshold
   -> CHARGE_STOP / REST DC current and power stably near zero
-  -> BALANCING          balancing flag detected
-     or
-  -> POST_CHARGE_REST   no balancing flag detected
+  -> POST_CHARGE_REST   post-charge observation window
   -> CYCLE_END
+
+BALANCING is tracked independently as an ON/OFF signal and may overlap REST or POST_CHARGE_REST.
 ```
 
 Cycles without a balancing flag are intentionally retained because they provide a useful reference for natural LFP relaxation.
+
+
+## v0.1.1 validation and plausibility safeguards
+
+Before the first live test the analyzer was hardened with the following checks:
+
+- charge stop is timestamped at the **start of the stable-zero window**, not 30 s late at confirmation time
+- balancing is tracked independently from the charge/rest phase and can contain multiple ON/OFF sessions
+- `unknown` / `unavailable` balancing state is not treated as `OFF`
+- a high-SoC battery sitting idle — even with a high Vmax — does not create a false observation cycle
+- DC current and DC power are cross-checked; contradictory flow directions are flagged instead of silently interpreted
+- non-zero series current during balancing or after charge stop is flagged so delta-based estimates are not treated as clean measurements
+- a cycle-level delta reduction is only published when the post-charge observation stayed uncontaminated by subsequent current flow
+- LFP cell values below 3.0 V remain valid; the configured upper plausibility limit defaults to 3.8 V
+- pack voltage is checked against the possible envelope from Vmin/Vmax and, later, against the sum of all individual cells
+- battery voltage is stored explicitly for later capacity / SoH work
+- current-cycle and last-completed-cycle data are kept separate
+- open cycles survive analyzer restarts and are marked with a measurement-gap flag
+- Home Assistant WebSocket disconnects are recorded as measurement gaps
+- SQLite schema upgrades are forward-migrated from v0.1.0
+
+The repository also contains unit tests and GitHub validation workflows for the analyzer logic, HACS metadata and Home Assistant app configuration.
 
 ## Data storage
 
 The project keeps the responsibilities separate:
 
-- **Home Assistant Recorder**: untouched; remains Home Assistant's own recorder database.
+- **Home Assistant Recorder / MariaDB**: untouched; remains Home Assistant's own recorder database.
 - **InfluxDB**: existing long-term raw time-series storage.
 - **Analyzer SQLite**: only semantic analyzer data such as detected cycles, phases, samples and calculated results.
 - **RAM**: current state and short working buffers only.
+
+SQLite therefore does not replace or duplicate Home Assistant's MariaDB recorder.
 
 ## Installation from GitHub
 
@@ -177,7 +198,7 @@ Typical inputs include:
 - AC current, if available
 - battery / internal temperature
 
-The sign convention of source sensors is normalized in configuration so later algorithms do not depend on whether a specific integration reports charging as positive or negative.
+The sign convention of source sensors is normalized separately for DC power, DC current, AC power and AC current so later algorithms do not depend on source-specific sign conventions.
 
 ## Future 16-cell support
 
@@ -203,7 +224,7 @@ The currently reported Marstek `Vmin` and `Vmax` can then remain as independent 
 
 ## Planned analysis extensions
 
-Not yet implemented in v0.1.0:
+Not yet implemented in v0.1.1:
 
 - InfluxDB history and replay adapter
 - robust slope calculation / regression over time windows
@@ -226,7 +247,7 @@ The analyzer is intentionally event-driven and lightweight for a Raspberry Pi 4 
 
 ## Safety
 
-Version 0.1.0 is strictly **read-only / observation-only**. It does not control charging, discharging, force mode, power limits or BMS settings.
+Version 0.1.1 is strictly **read-only / observation-only**. It does not control charging, discharging, force mode, power limits or BMS settings.
 
 ## Repository structure
 

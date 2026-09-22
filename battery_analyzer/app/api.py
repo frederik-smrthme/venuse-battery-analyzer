@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from aiohttp import web
 
 from analyzer import Analyzer
@@ -19,7 +21,11 @@ class ApiServer:
         ])
 
     async def health(self, request: web.Request) -> web.Response:
-        return web.json_response({'status': 'ok', 'version': '0.1.0'})
+        return web.json_response({
+            'status': 'ok',
+            'version': os.environ.get('APP_VERSION', '0.1.1'),
+            'ha_connected': self.analyzer.ha_connected,
+        })
 
     async def status(self, request: web.Request) -> web.Response:
         return web.json_response(self.analyzer.status())
@@ -34,8 +40,8 @@ class ApiServer:
     async def cycle(self, request: web.Request) -> web.Response:
         try:
             cycle_id = int(request.match_info['cycle_id'])
-        except ValueError:
-            raise web.HTTPBadRequest(text='invalid cycle id')
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text='invalid cycle id') from exc
         row = self.db.get_cycle(cycle_id)
         if row is None:
             raise web.HTTPNotFound(text='cycle not found')

@@ -1,9 +1,11 @@
 {
   "domain": "marstek_battery_analyzer",
   "name": "Marstek Battery Analyzer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "config_flow": true,
   "documentation": "https://github.com/frederik-smrthme/venuse-battery-analyzer",
+  "issue_tracker": "https://github.com/frederik-smrthme/venuse-battery-analyzer/issues",
+  "codeowners": ["@frederik-smrthme"],
   "integration_type": "hub",
   "iot_class": "local_polling",
   "requirements": []
