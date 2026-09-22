@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Marstek Battery Analyzer",
+        "description": "Home Assistant mit der lokalen Analyzer-App verbinden.",
+        "data": {
+          "url": "Analyzer-URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zur Analyzer-App nicht moeglich."
+    }
+  }
+}
