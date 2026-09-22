@@ -1,5 +1,9 @@
 # Marstek Battery Analyzer
 
+**Disclaimer**
+
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of functionality, fitness for a particular purpose, or non-infringement.Use at your own risk. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
+
 A local Home Assistant analyzer for **Marstek Venus E / LFP batteries**. The project observes the upper charging range, charge stop, relaxation and BMS balancing behavior and exposes the analysis as native Home Assistant entities.
 
 > **Development status:** v0.1.0 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
@@ -19,7 +23,7 @@ The analyzer is intended to build a reliable long-term picture of battery behavi
 - future estimation of balancing current
 - future capacity / SoH analysis
 
-The current Marstek data source provides only minimum and maximum cell voltage. The internal data model is deliberately prepared for **all 16 individual cell voltages** when these become available later.
+The current data source provides only minimum and maximum cell voltage. The internal data model is deliberately prepared for **all 16 individual cell voltages** when these become available later.
 
 ## Architecture
 
@@ -46,7 +50,6 @@ Marstek / OmniBattery entities
                     native HA entities
 ```
 
-No MQTT and no external server are required.
 
 ## Battery defaults
 
@@ -86,12 +89,10 @@ Cycles without a balancing flag are intentionally retained because they provide 
 
 The project keeps the responsibilities separate:
 
-- **Home Assistant Recorder / MariaDB**: untouched; remains Home Assistant's own recorder database.
+- **Home Assistant Recorder**: untouched; remains Home Assistant's own recorder database.
 - **InfluxDB**: existing long-term raw time-series storage.
 - **Analyzer SQLite**: only semantic analyzer data such as detected cycles, phases, samples and calculated results.
 - **RAM**: current state and short working buffers only.
-
-SQLite therefore does not replace or duplicate Home Assistant's MariaDB recorder.
 
 ## Installation from GitHub
 
