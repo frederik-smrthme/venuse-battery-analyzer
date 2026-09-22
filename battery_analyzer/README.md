@@ -2,5 +2,5 @@
 
 Analyzes the upper LFP charge range, charge-stop relaxation and BMS balancing behavior.
 
-Version 0.1.1 focuses on safe read-only observation, robust charge-stop/balancing event detection and local SQLite cycle storage.
+Version 0.1.2 focuses on safe read-only observation, robust charge-stop/balancing event detection and local SQLite cycle storage.
 InfluxDB replay/history adapters are intentionally deferred until the local InfluxDB schema/version is inspected.

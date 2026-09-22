@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2
+
+- Corrected Home Assistant manifest type to `service` and enforced a single config entry.
+- Added Home Assistant app watchdog using the existing `/health` endpoint.
+- Marked the app as experimental while the first live installations are being validated.
+- Set the default LFP cell plausibility floor to 2.0 V while retaining configurability.
+- Debounced transient DC signal conflicts caused by sequential Home Assistant entity updates.
+- Debounced transient non-zero-flow observations at balancing start to avoid false quality flags.
+- Updated package/version metadata consistently to 0.1.2.
+
 ## 0.1.1
 
 - Hardened charge-stop detection and timestamping.

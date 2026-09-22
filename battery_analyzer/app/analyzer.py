@@ -186,6 +186,7 @@ class Analyzer:
     FLOW_DISCHARGING = 'discharging'
     FLOW_CONFLICT = 'conflict'
     FLOW_UNKNOWN = 'unknown'
+    TRANSIENT_GUARD_SECONDS = 5
 
     def __init__(self, settings: Settings, db: Database) -> None:
         self.settings = settings
@@ -207,7 +208,9 @@ class Analyzer:
         self.measurement_gaps = False
         self.charge_resumed = False
         self.signal_conflict_seen = False
+        self.flow_conflict_candidate_at: datetime | None = None
         self.balancing_nonzero_flow_seen = False
+        self.balancing_nonzero_candidate_at: datetime | None = None
         self.balancing_signal_unknown_seen = False
         self.post_stop_nonzero_flow_seen = False
         self.invalid_sample_count = 0
@@ -344,7 +347,9 @@ class Analyzer:
         self.measurement_gaps = False
         self.charge_resumed = False
         self.signal_conflict_seen = False
+        self.flow_conflict_candidate_at = None
         self.balancing_nonzero_flow_seen = False
+        self.balancing_nonzero_candidate_at = None
         self.balancing_signal_unknown_seen = False
         self.post_stop_nonzero_flow_seen = False
         self.invalid_sample_count = 0
@@ -576,7 +581,9 @@ class Analyzer:
         self.measurement_gaps = False
         self.charge_resumed = False
         self.signal_conflict_seen = False
+        self.flow_conflict_candidate_at = None
         self.balancing_nonzero_flow_seen = False
+        self.balancing_nonzero_candidate_at = None
         self.balancing_signal_unknown_seen = False
         self.post_stop_nonzero_flow_seen = False
         self.invalid_sample_count = 0
@@ -608,8 +615,17 @@ class Analyzer:
                 self._finish_cycle(now, 'max_cycle_timeout')
                 return
 
+        # Home Assistant updates current and power entities sequentially. A single update can
+        # therefore momentarily make them disagree even though the physical flow is valid.
+        # Only persist a conflict quality flag when the disagreement survives a short guard.
         if flow == self.FLOW_CONFLICT:
-            self.signal_conflict_seen = True
+            if self.flow_conflict_candidate_at is None:
+                self.flow_conflict_candidate_at = now
+            elif (now - self.flow_conflict_candidate_at).total_seconds() >= self.TRANSIENT_GUARD_SECONDS:
+                self.signal_conflict_seen = True
+        else:
+            self.flow_conflict_candidate_at = None
+
         if balancing is None:
             self.balancing_signal_unknown_seen = True
 
@@ -626,7 +642,13 @@ class Analyzer:
         # The observed Venus E balancing phase is expected to have no series current.
         # Keep the data, but flag any non-zero flow so later current/delta estimates are not trusted.
         if balancing is True and flow in (self.FLOW_CHARGING, self.FLOW_DISCHARGING, self.FLOW_CONFLICT):
-            self.balancing_nonzero_flow_seen = True
+            if self.balancing_nonzero_candidate_at is None:
+                self.balancing_nonzero_candidate_at = now
+            elif (now - self.balancing_nonzero_candidate_at).total_seconds() >= self.TRANSIENT_GUARD_SECONDS:
+                self.balancing_nonzero_flow_seen = True
+        else:
+            self.balancing_nonzero_candidate_at = None
+
         if self.charge_stop_at is not None and flow in (
             self.FLOW_CHARGING,
             self.FLOW_DISCHARGING,
@@ -737,7 +759,7 @@ class Analyzer:
         else:
             cell_source = 'partial_individual'
         return {
-            'version': __import__('os').environ.get('APP_VERSION', '0.1.1'),
+            'version': __import__('os').environ.get('APP_VERSION', '0.1.2'),
             'schema_version': 2,
             'phase': self.phase,
             'analysis_state': analysis_state,

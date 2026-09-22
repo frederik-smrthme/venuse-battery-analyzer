@@ -243,10 +243,38 @@ class AnalyzerTestCase(unittest.TestCase):
         self.assertEqual(last['id'], cycle_id)
         self.assertEqual(last['end_reason'], 'balancing_only_cycle_end')
 
-    def test_balancing_with_series_current_is_flagged(self):
+    def test_transient_dc_signal_conflict_is_not_persisted_as_quality_failure(self):
+        self.begin_charge()
+        self.set_values(dc_power=100, dc_current=-2)
+        self.analyzer.evaluate(BASE + timedelta(seconds=10))
+        self.assertFalse(self.analyzer.signal_conflict_seen)
+
+        self.set_values(dc_current=2)
+        self.analyzer.evaluate(BASE + timedelta(seconds=12))
+        self.assertFalse(self.analyzer.signal_conflict_seen)
+
+    def test_stable_dc_signal_conflict_is_flagged(self):
+        self.begin_charge()
+        self.set_values(dc_power=100, dc_current=-2)
+        self.analyzer.evaluate(BASE + timedelta(seconds=10))
+        self.analyzer.evaluate(BASE + timedelta(seconds=15))
+        self.assertTrue(self.analyzer.signal_conflict_seen)
+
+    def test_transient_balancing_nonzero_flow_is_not_flagged(self):
         self.begin_charge()
         self.set_values(balancing='on')
         self.analyzer.evaluate(BASE + timedelta(seconds=10))
+        self.assertFalse(self.analyzer.balancing_nonzero_flow_seen)
+
+        self.set_values(dc_power=0, dc_current=0)
+        self.analyzer.evaluate(BASE + timedelta(seconds=12))
+        self.assertFalse(self.analyzer.balancing_nonzero_flow_seen)
+
+    def test_balancing_with_stable_series_current_is_flagged(self):
+        self.begin_charge()
+        self.set_values(balancing='on')
+        self.analyzer.evaluate(BASE + timedelta(seconds=10))
+        self.analyzer.evaluate(BASE + timedelta(seconds=15))
         self.assertTrue(self.analyzer.balancing_nonzero_flow_seen)
 
     def test_v010_database_is_forward_migrated(self):

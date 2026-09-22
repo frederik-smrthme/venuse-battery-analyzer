@@ -32,7 +32,7 @@ class Settings:
     post_charge_observation_minutes: int = 240
     max_cycle_hours: int = 24
     sample_interval_seconds: int = 5
-    cell_voltage_min_v: float = 1.5
+    cell_voltage_min_v: float = 2.0
     cell_voltage_max_v: float = 3.8
     pack_voltage_tolerance_v: float = 0.75
     battery_cell_count: int = 16
@@ -146,6 +146,8 @@ class Settings:
                     f'with {self.battery_nominal_voltage_v:.2f} V x {self.battery_capacity_ah:.1f} Ah '
                     f'(~{expected_kwh:.3f} kWh)'
                 )
+        if len(set(self.cell_entities)) != len(self.cell_entities):
+            warnings.append('individual cell entity list contains duplicate entity IDs')
         if self.cell_entities and len(self.cell_entities) != self.battery_cell_count:
             warnings.append(
                 f'{len(self.cell_entities)} individual cell entities configured, '
