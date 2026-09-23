@@ -27,11 +27,13 @@ The app exposes a read-only JSON API on port 8099 by default:
 The app does not alter charging or battery control settings. It is observation-only.
 
 
-## Important v0.1.3 behavior
+## Important v0.1.4 behavior
 
 - Charge-stop time is the start of the stable-zero window; confirmation occurs after the configured stability interval.
 - Balancing is an independent signal and may span multiple ON/OFF sessions in one cycle.
 - An unavailable balancing entity is treated as unknown, never as an OFF transition.
-- DC current and power direction conflicts are flagged in cycle quality data.
+- DC current is optional. If absent, the analyzer derives it from DC power / pack voltage and marks the source as calculated.
+- Direction conflicts are only evaluated when DC current is directly measured, so calculated current is not double-counted as an independent flow signal.
+- If no battery-temperature sensor exists, internal temperature is retained as an explicitly labelled proxy for analysis.
 - Cell-voltage plausibility defaults to 2.0-3.8 V; values below 3.0 V are valid LFP measurements.
 - The API remains read-only.

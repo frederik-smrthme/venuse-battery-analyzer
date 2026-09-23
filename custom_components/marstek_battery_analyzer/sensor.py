@@ -63,6 +63,7 @@ SENSORS = (
         device_class=SensorDeviceClass.VOLTAGE,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
         value_fn=live('vmax'),
     ),
     AnalyzerSensorDescription(
@@ -71,6 +72,7 @@ SENSORS = (
         device_class=SensorDeviceClass.VOLTAGE,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
         value_fn=live('vmin'),
     ),
     AnalyzerSensorDescription(
@@ -78,6 +80,7 @@ SENSORS = (
         name='Cell delta',
         native_unit_of_measurement='mV',
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
         value_fn=live('delta_mv'),
     ),
     AnalyzerSensorDescription(
@@ -86,6 +89,7 @@ SENSORS = (
         device_class=SensorDeviceClass.VOLTAGE,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
         value_fn=live('battery_voltage_v'),
     ),
     AnalyzerSensorDescription(
@@ -102,7 +106,13 @@ SENSORS = (
         device_class=SensorDeviceClass.CURRENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
         value_fn=live('dc_current_a'),
+    ),
+    AnalyzerSensorDescription(
+        key='dc_current_source',
+        name='DC current source',
+        value_fn=live('dc_current_source'),
     ),
     AnalyzerSensorDescription(
         key='ac_power',
@@ -113,20 +123,18 @@ SENSORS = (
         value_fn=live('ac_power_w'),
     ),
     AnalyzerSensorDescription(
-        key='ac_current',
-        name='AC current',
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=live('ac_current_a'),
-    ),
-    AnalyzerSensorDescription(
         key='battery_temperature',
-        name='Battery temperature',
+        name='Analysis temperature',
         device_class=SensorDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=live('battery_temperature_c'),
+        suggested_display_precision=1,
+        value_fn=live('analysis_temperature_c'),
+    ),
+    AnalyzerSensorDescription(
+        key='temperature_source',
+        name='Analysis temperature source',
+        value_fn=live('analysis_temperature_source'),
     ),
     AnalyzerSensorDescription(
         key='internal_temperature',
@@ -134,6 +142,7 @@ SENSORS = (
         device_class=SensorDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
         value_fn=live('internal_temperature_c'),
     ),
     AnalyzerSensorDescription(

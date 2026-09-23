@@ -49,10 +49,10 @@ class Settings:
     entity_vmin: str = 'sensor.marstek_venus_1_min_cell_voltage'
     entity_battery_voltage: str = 'sensor.marstek_venus_1_battery_voltage'
     entity_dc_power: str = 'sensor.marstek_venus_1_battery_power'
-    entity_dc_current: str = 'sensor.marstek_venus_1_battery_current'
+    entity_dc_current: str = ''
     entity_ac_power: str = 'sensor.marstek_venus_1_ac_power'
-    entity_ac_current: str = 'sensor.marstek_venus_1_ac_current'
-    entity_battery_temperature: str = 'sensor.marstek_venus_1_battery_temperature'
+    entity_ac_current: str = ''
+    entity_battery_temperature: str = ''
     entity_internal_temperature: str = 'sensor.marstek_venus_1_internal_temperature'
     entity_balancing: str = 'binary_sensor.marstek_venus_1_balancing_mode'
     cell_entities_csv: str = ''
@@ -82,24 +82,41 @@ class Settings:
         return 8099
 
     @property
-    def entity_map(self) -> dict[str, str]:
+    def required_entity_map(self) -> dict[str, str]:
         return {
             'soc': self.entity_soc,
             'vmax': self.entity_vmax,
             'vmin': self.entity_vmin,
             'battery_voltage': self.entity_battery_voltage,
             'dc_power': self.entity_dc_power,
-            'dc_current': self.entity_dc_current,
             'ac_power': self.entity_ac_power,
-            'ac_current': self.entity_ac_current,
-            'battery_temperature': self.entity_battery_temperature,
             'internal_temperature': self.entity_internal_temperature,
             'balancing': self.entity_balancing,
         }
 
     @property
+    def optional_entity_map(self) -> dict[str, str]:
+        return {
+            'dc_current': self.entity_dc_current,
+            'ac_current': self.entity_ac_current,
+            'battery_temperature': self.entity_battery_temperature,
+        }
+
+    @property
+    def entity_map(self) -> dict[str, str]:
+        return {**self.required_entity_map, **self.optional_entity_map}
+
+    @property
     def watched_entities(self) -> set[str]:
         return {v for v in self.entity_map.values() if v} | set(self.cell_entities)
+
+    @property
+    def required_entities(self) -> set[str]:
+        return {v for v in self.required_entity_map.values() if v}
+
+    @property
+    def optional_entities(self) -> set[str]:
+        return {v for v in self.optional_entity_map.values() if v}
 
     @property
     def usable_capacity_kwh(self) -> float:

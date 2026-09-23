@@ -62,6 +62,9 @@ class Database:
                 battery_voltage_at_stop_v REAL,
                 battery_temperature_at_stop_c REAL,
                 internal_temperature_at_stop_c REAL,
+                analysis_temperature_at_stop_c REAL,
+                analysis_temperature_source TEXT,
+                dc_current_source TEXT,
                 end_reason TEXT,
                 quality_json TEXT NOT NULL DEFAULT '{}'
             );
@@ -89,6 +92,7 @@ class Database:
                 battery_voltage_v REAL,
                 dc_power_w REAL,
                 dc_current_a REAL,
+                dc_current_source TEXT,
                 ac_power_w REAL,
                 ac_current_a REAL,
                 normalized_dc_charge_power_w REAL,
@@ -97,6 +101,8 @@ class Database:
                 normalized_ac_charge_current_a REAL,
                 battery_temperature_c REAL,
                 internal_temperature_c REAL,
+                analysis_temperature_c REAL,
+                analysis_temperature_source TEXT,
                 balancing INTEGER,
                 cells_json TEXT,
                 plausibility_json TEXT NOT NULL DEFAULT '[]',
@@ -116,12 +122,18 @@ class Database:
             ('balancing_session_count', 'INTEGER NOT NULL DEFAULT 0'),
             ('battery_voltage_at_stop_v', 'REAL'),
             ('ac_current_before_stop_a', 'REAL'),
+            ('analysis_temperature_at_stop_c', 'REAL'),
+            ('analysis_temperature_source', 'TEXT'),
+            ('dc_current_source', 'TEXT'),
             ('end_reason', 'TEXT'),
         ):
             self._ensure_column('cycles', column, ddl)
 
         for column, ddl in (
             ('battery_voltage_v', 'REAL'),
+            ('dc_current_source', 'TEXT'),
+            ('analysis_temperature_c', 'REAL'),
+            ('analysis_temperature_source', 'TEXT'),
             ('normalized_dc_charge_power_w', 'REAL'),
             ('normalized_dc_charge_current_a', 'REAL'),
             ('normalized_ac_charge_power_w', 'REAL'),
@@ -180,22 +192,24 @@ class Database:
             '''
             INSERT INTO samples(
                 cycle_id, ts, phase, soc, vmax, vmin, delta_mv, battery_voltage_v,
-                dc_power_w, dc_current_a, ac_power_w, ac_current_a,
+                dc_power_w, dc_current_a, dc_current_source, ac_power_w, ac_current_a,
                 normalized_dc_charge_power_w, normalized_dc_charge_current_a,
                 normalized_ac_charge_power_w, normalized_ac_charge_current_a,
-                battery_temperature_c, internal_temperature_c, balancing,
-                cells_json, plausibility_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                battery_temperature_c, internal_temperature_c, analysis_temperature_c,
+                analysis_temperature_source, balancing, cells_json, plausibility_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''',
             (
                 cycle_id,
                 sample['ts'], sample['phase'], sample.get('soc'), sample.get('vmax'), sample.get('vmin'),
                 sample.get('delta_mv'), sample.get('battery_voltage_v'), sample.get('dc_power_w'),
-                sample.get('dc_current_a'), sample.get('ac_power_w'), sample.get('ac_current_a'),
-                sample.get('normalized_dc_charge_power_w'), sample.get('normalized_dc_charge_current_a'),
-                sample.get('normalized_ac_charge_power_w'), sample.get('normalized_ac_charge_current_a'),
-                sample.get('battery_temperature_c'), sample.get('internal_temperature_c'), balancing_db,
-                json.dumps(sample.get('cells') or {}), json.dumps(sample.get('plausibility') or []),
+                sample.get('dc_current_a'), sample.get('dc_current_source'), sample.get('ac_power_w'),
+                sample.get('ac_current_a'), sample.get('normalized_dc_charge_power_w'),
+                sample.get('normalized_dc_charge_current_a'), sample.get('normalized_ac_charge_power_w'),
+                sample.get('normalized_ac_charge_current_a'), sample.get('battery_temperature_c'),
+                sample.get('internal_temperature_c'), sample.get('analysis_temperature_c'),
+                sample.get('analysis_temperature_source'), balancing_db, json.dumps(sample.get('cells') or {}),
+                json.dumps(sample.get('plausibility') or []),
             ),
         )
         self.conn.commit()

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4
+
+- Make DC current, AC current and battery-temperature entities optional.
+- Derive DC current from DC power / pack voltage when no measured current sensor is available.
+- Record current provenance (`measured` vs `calculated_from_power_voltage`).
+- Use internal temperature only as an explicitly labelled analysis-temperature proxy when no battery temperature sensor exists.
+- Persist current/temperature provenance with cycle samples and charge-stop metadata.
+- Do not treat calculated DC current as an independent flow signal for charge-stop classification.
+- Show cell Vmax/Vmin with 3 decimal places and improve display precision of key values.
+- Separate missing required entities from missing optional entities.
+
 
 ## 0.1.3
 

@@ -89,12 +89,45 @@ class LiveState:
             battery_voltage = None
 
         dc_power = as_float(self.values.get('dc_power'))
-        dc_current = as_float(self.values.get('dc_current'))
+        direct_dc_current = as_float(self.values.get('dc_current'))
         ac_power = as_float(self.values.get('ac_power'))
         ac_current = as_float(self.values.get('ac_current'))
         battery_temperature = as_float(self.values.get('battery_temperature'))
         internal_temperature = as_float(self.values.get('internal_temperature'))
         balancing = as_bool(self.values.get('balancing'))
+
+        # DC current is optional on some Venus E integrations. If there is no direct
+        # current entity, derive it from DC power / pack voltage for analysis and display.
+        # Provenance is kept explicitly so later SoH/balancing-current work can distinguish
+        # measured current from a calculated estimate.
+        if direct_dc_current is not None:
+            dc_current = direct_dc_current
+            dc_current_source = 'measured'
+            normalized_dc_current = settings.normalize_dc_current_charge(direct_dc_current)
+        elif dc_power is not None and battery_voltage is not None and battery_voltage > 0:
+            dc_current = dc_power / battery_voltage
+            dc_current_source = 'calculated_from_power_voltage'
+            normalized_power = settings.normalize_dc_power_charge(dc_power)
+            normalized_dc_current = (
+                normalized_power / battery_voltage if normalized_power is not None else None
+            )
+        else:
+            dc_current = None
+            dc_current_source = 'unavailable'
+            normalized_dc_current = None
+
+        # Prefer a real battery-temperature sensor when one exists. On the current Venus E
+        # data set only internal temperature is available, so keep it as a clearly labelled
+        # proxy rather than pretending it is cell temperature.
+        if battery_temperature is not None:
+            analysis_temperature = battery_temperature
+            analysis_temperature_source = 'battery_sensor'
+        elif internal_temperature is not None:
+            analysis_temperature = internal_temperature
+            analysis_temperature_source = 'internal_temperature_proxy'
+        else:
+            analysis_temperature = None
+            analysis_temperature_source = 'unavailable'
 
         valid_cells: dict[int, float] = {}
         for idx, value in self.cells.items():
@@ -159,15 +192,18 @@ class LiveState:
             'battery_voltage_v': battery_voltage,
             'dc_power_w': dc_power,
             'dc_current_a': dc_current,
+            'dc_current_source': dc_current_source,
             'ac_power_w': ac_power,
             'ac_current_a': ac_current,
             'battery_temperature_c': battery_temperature,
             'internal_temperature_c': internal_temperature,
+            'analysis_temperature_c': analysis_temperature,
+            'analysis_temperature_source': analysis_temperature_source,
             'balancing': balancing,
             'cells': dict(valid_cells),
             'cell_calculated': calculated,
             'normalized_dc_charge_power_w': settings.normalize_dc_power_charge(dc_power),
-            'normalized_dc_charge_current_a': settings.normalize_dc_current_charge(dc_current),
+            'normalized_dc_charge_current_a': normalized_dc_current,
             'normalized_ac_charge_power_w': settings.normalize_ac_power_charge(ac_power),
             'normalized_ac_charge_current_a': settings.normalize_ac_current_charge(ac_current),
             'plausibility': plausibility,
@@ -221,6 +257,7 @@ class Analyzer:
         self.balancing_session_count = 0
         self.ha_connected = False
         self.missing_entities: list[str] = []
+        self.missing_optional_entities: list[str] = []
         self.config_warnings = settings.validation_warnings()
         self._restore_open_cycle()
 
@@ -279,7 +316,10 @@ class Analyzer:
                     self.live.cells[index] = value
 
         self.missing_entities = sorted(
-            entity for entity in self.settings.watched_entities if entity not in by_id
+            entity for entity in self.settings.required_entities if entity not in by_id
+        )
+        self.missing_optional_entities = sorted(
+            entity for entity in self.settings.optional_entities if entity not in by_id
         )
 
     def handle_state(self, entity_id: str, state: str | None, ts: datetime | None = None) -> None:
@@ -301,6 +341,10 @@ class Analyzer:
     def _classify_flow(self, snap: dict[str, Any]) -> str:
         current = snap.get('normalized_dc_charge_current_a')
         power = snap.get('normalized_dc_charge_power_w')
+        if snap.get('dc_current_source') == 'calculated_from_power_voltage':
+            # Calculated current contains no independent flow information; using both current
+            # and power would apply two different zero thresholds to the same measurement.
+            current = None
 
         def cls(value: float | None, threshold: float) -> str | None:
             if value is None:
@@ -407,6 +451,9 @@ class Analyzer:
                 'battery_voltage_at_stop_v': stop_snap.get('battery_voltage_v'),
                 'battery_temperature_at_stop_c': stop_snap.get('battery_temperature_c'),
                 'internal_temperature_at_stop_c': stop_snap.get('internal_temperature_c'),
+                'analysis_temperature_at_stop_c': stop_snap.get('analysis_temperature_c'),
+                'analysis_temperature_source': stop_snap.get('analysis_temperature_source'),
+                'dc_current_source': before.get('dc_current_source'),
             }
             self.db.update_cycle(self.current_cycle_id, **fields)
             self._event(
@@ -759,7 +806,7 @@ class Analyzer:
         else:
             cell_source = 'partial_individual'
         return {
-            'version': __import__('os').environ.get('APP_VERSION', '0.1.3'),
+            'version': __import__('os').environ.get('APP_VERSION', '0.1.4'),
             'schema_version': 2,
             'phase': self.phase,
             'analysis_state': analysis_state,
@@ -790,6 +837,7 @@ class Analyzer:
             'cell_source': cell_source,
             'diagnostics': {
                 'missing_entities': self.missing_entities,
+                'missing_optional_entities': self.missing_optional_entities,
                 'config_warnings': self.config_warnings,
                 'measurement_gaps': self.measurement_gaps,
                 'signal_conflict_seen': self.signal_conflict_seen,

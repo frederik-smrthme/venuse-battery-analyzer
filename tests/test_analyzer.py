@@ -138,6 +138,70 @@ class AnalyzerTestCase(unittest.TestCase):
         self.assertIsNone(snap['vmax'])
         self.assertTrue(any(item.startswith('vmax_out_of_range') for item in snap['plausibility']))
 
+
+    def test_dc_current_is_calculated_when_direct_sensor_missing(self):
+        state = LiveState(values={
+            'battery_voltage': '53.0',
+            'dc_power': '727',
+            'soc': '25',
+            'vmax': '3.316',
+            'vmin': '3.313',
+        })
+        snap = state.snapshot(self.settings, Analyzer.PHASE_NORMAL, BASE)
+        self.assertAlmostEqual(snap['dc_current_a'], 727 / 53.0, places=6)
+        self.assertAlmostEqual(snap['normalized_dc_charge_current_a'], 727 / 53.0, places=6)
+        self.assertEqual(snap['dc_current_source'], 'calculated_from_power_voltage')
+
+    def test_calculated_dc_current_does_not_apply_a_second_flow_threshold(self):
+        state = LiveState(values={
+            'battery_voltage': '53.0',
+            'dc_power': '10',
+            'soc': '99',
+            'vmax': '3.50',
+            'vmin': '3.40',
+        })
+        snap = state.snapshot(self.settings, Analyzer.PHASE_NORMAL, BASE)
+        # 10 W / 53 V is about 0.19 A, above the current threshold, but it is derived
+        # from the same power sample. Flow classification must therefore use power only.
+        self.assertEqual(snap['dc_current_source'], 'calculated_from_power_voltage')
+        self.assertEqual(self.analyzer._classify_flow(snap), Analyzer.FLOW_ZERO)
+
+    def test_direct_dc_current_is_preferred_when_available(self):
+        state = LiveState(values={
+            'battery_voltage': '53.0',
+            'dc_power': '727',
+            'dc_current': '13.5',
+        })
+        snap = state.snapshot(self.settings, Analyzer.PHASE_NORMAL, BASE)
+        self.assertEqual(snap['dc_current_source'], 'measured')
+        self.assertAlmostEqual(snap['dc_current_a'], 13.5)
+
+    def test_internal_temperature_is_used_as_labelled_analysis_proxy(self):
+        state = LiveState(values={'internal_temperature': '31.8'})
+        snap = state.snapshot(self.settings, Analyzer.PHASE_NORMAL, BASE)
+        self.assertAlmostEqual(snap['analysis_temperature_c'], 31.8)
+        self.assertEqual(snap['analysis_temperature_source'], 'internal_temperature_proxy')
+        self.assertIsNone(snap['battery_temperature_c'])
+
+    def test_battery_temperature_is_preferred_over_internal_proxy(self):
+        state = LiveState(values={'battery_temperature': '24.2', 'internal_temperature': '31.8'})
+        snap = state.snapshot(self.settings, Analyzer.PHASE_NORMAL, BASE)
+        self.assertAlmostEqual(snap['analysis_temperature_c'], 24.2)
+        self.assertEqual(snap['analysis_temperature_source'], 'battery_sensor')
+
+    def test_missing_optional_entities_are_not_reported_as_required(self):
+        required_states = [
+            {'entity_id': entity, 'state': '0'}
+            for entity in self.settings.required_entities
+        ]
+        # Simulate a legacy installation that still has non-existent optional IDs configured.
+        self.settings.entity_dc_current = 'sensor.missing_dc_current'
+        self.settings.entity_ac_current = 'sensor.missing_ac_current'
+        self.settings.entity_battery_temperature = 'sensor.missing_battery_temperature'
+        self.analyzer.set_initial_states(required_states)
+        self.assertEqual(self.analyzer.missing_entities, [])
+        self.assertEqual(len(self.analyzer.missing_optional_entities), 3)
+
     def test_last_cycle_means_last_completed_cycle(self):
         self.begin_charge()
         first_id = self.analyzer.current_cycle_id
@@ -314,8 +378,14 @@ class AnalyzerTestCase(unittest.TestCase):
             sample_cols = migrated._columns('samples')
             self.assertIn('charge_stop_confirmed_at', cycle_cols)
             self.assertIn('ac_current_before_stop_a', cycle_cols)
+            self.assertIn('analysis_temperature_at_stop_c', cycle_cols)
+            self.assertIn('analysis_temperature_source', cycle_cols)
+            self.assertIn('dc_current_source', cycle_cols)
             self.assertIn('battery_voltage_v', sample_cols)
             self.assertIn('plausibility_json', sample_cols)
+            self.assertIn('dc_current_source', sample_cols)
+            self.assertIn('analysis_temperature_c', sample_cols)
+            self.assertIn('analysis_temperature_source', sample_cols)
         finally:
             migrated.close()
 
