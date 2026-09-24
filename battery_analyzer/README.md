@@ -2,7 +2,9 @@
 
 Analyzes the upper LFP charge range, charge-stop relaxation and BMS balancing behavior.
 
-Version 0.1.4 focuses on safe read-only observation, robust charge-stop/balancing event detection and local SQLite cycle storage.
+Version 0.1.5 adds clean balancing-end capture and conservative matched-Vmax delta comparison while keeping the analyzer strictly read-only.
+
+If charging or discharging begins while the BMS balancing flag is still active, the analyzer freezes the last valid zero-series-current sample and uses that as the balancing endpoint. Delta comparisons are only considered valid when both samples are at zero series current and Vmax differs by no more than the configured tolerance (default 5 mV).
 InfluxDB replay/history adapters are intentionally deferred until the local InfluxDB schema/version is inspected.
 
 

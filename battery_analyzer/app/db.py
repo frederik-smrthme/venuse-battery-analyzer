@@ -40,10 +40,15 @@ class Database:
                 rest_reference_at TEXT,
                 balancing_start_at TEXT,
                 balancing_end_at TEXT,
+                balancing_clean_end_at TEXT,
                 balancing_active_since TEXT,
                 balancing_detected INTEGER NOT NULL DEFAULT 0,
                 balancing_duration_s REAL NOT NULL DEFAULT 0,
                 balancing_session_count INTEGER NOT NULL DEFAULT 0,
+                balancing_clean_end_vmax REAL,
+                balancing_clean_end_vmin REAL,
+                balancing_clean_end_delta_mv REAL,
+                balancing_end_reason TEXT,
                 soc_start REAL,
                 soc_charge_stop REAL,
                 vmax_charge_stop REAL,
@@ -65,6 +70,18 @@ class Database:
                 analysis_temperature_at_stop_c REAL,
                 analysis_temperature_source TEXT,
                 dc_current_source TEXT,
+                matched_ref_at TEXT,
+                matched_ref_vmax REAL,
+                matched_ref_delta_mv REAL,
+                matched_cmp_at TEXT,
+                matched_cmp_vmax REAL,
+                matched_cmp_delta_mv REAL,
+                matched_vmax_diff_mv REAL,
+                matched_delta_reduction_mv REAL,
+                matched_elapsed_s REAL,
+                matched_temperature_diff_c REAL,
+                matched_vmax_tolerance_mv REAL,
+                matched_comparison_valid INTEGER NOT NULL DEFAULT 0,
                 end_reason TEXT,
                 quality_json TEXT NOT NULL DEFAULT '{}'
             );
@@ -104,6 +121,7 @@ class Database:
                 analysis_temperature_c REAL,
                 analysis_temperature_source TEXT,
                 balancing INTEGER,
+                flow_state TEXT,
                 cells_json TEXT,
                 plausibility_json TEXT NOT NULL DEFAULT '[]',
                 FOREIGN KEY(cycle_id) REFERENCES cycles(id) ON DELETE CASCADE
@@ -118,13 +136,30 @@ class Database:
             ('charge_stop_confirmed_at', 'TEXT'),
             ('rest_reference_at', 'TEXT'),
             ('balancing_active_since', 'TEXT'),
+            ('balancing_clean_end_at', 'TEXT'),
             ('balancing_duration_s', 'REAL NOT NULL DEFAULT 0'),
             ('balancing_session_count', 'INTEGER NOT NULL DEFAULT 0'),
+            ('balancing_clean_end_vmax', 'REAL'),
+            ('balancing_clean_end_vmin', 'REAL'),
+            ('balancing_clean_end_delta_mv', 'REAL'),
+            ('balancing_end_reason', 'TEXT'),
             ('battery_voltage_at_stop_v', 'REAL'),
             ('ac_current_before_stop_a', 'REAL'),
             ('analysis_temperature_at_stop_c', 'REAL'),
             ('analysis_temperature_source', 'TEXT'),
             ('dc_current_source', 'TEXT'),
+            ('matched_ref_at', 'TEXT'),
+            ('matched_ref_vmax', 'REAL'),
+            ('matched_ref_delta_mv', 'REAL'),
+            ('matched_cmp_at', 'TEXT'),
+            ('matched_cmp_vmax', 'REAL'),
+            ('matched_cmp_delta_mv', 'REAL'),
+            ('matched_vmax_diff_mv', 'REAL'),
+            ('matched_delta_reduction_mv', 'REAL'),
+            ('matched_elapsed_s', 'REAL'),
+            ('matched_temperature_diff_c', 'REAL'),
+            ('matched_vmax_tolerance_mv', 'REAL'),
+            ('matched_comparison_valid', 'INTEGER NOT NULL DEFAULT 0'),
             ('end_reason', 'TEXT'),
         ):
             self._ensure_column('cycles', column, ddl)
@@ -138,6 +173,7 @@ class Database:
             ('normalized_dc_charge_current_a', 'REAL'),
             ('normalized_ac_charge_power_w', 'REAL'),
             ('normalized_ac_charge_current_a', 'REAL'),
+            ('flow_state', 'TEXT'),
             ('plausibility_json', "TEXT NOT NULL DEFAULT '[]'"),
         ):
             self._ensure_column('samples', column, ddl)
@@ -196,8 +232,8 @@ class Database:
                 normalized_dc_charge_power_w, normalized_dc_charge_current_a,
                 normalized_ac_charge_power_w, normalized_ac_charge_current_a,
                 battery_temperature_c, internal_temperature_c, analysis_temperature_c,
-                analysis_temperature_source, balancing, cells_json, plausibility_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                analysis_temperature_source, balancing, flow_state, cells_json, plausibility_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''',
             (
                 cycle_id,
@@ -208,7 +244,8 @@ class Database:
                 sample.get('normalized_dc_charge_current_a'), sample.get('normalized_ac_charge_power_w'),
                 sample.get('normalized_ac_charge_current_a'), sample.get('battery_temperature_c'),
                 sample.get('internal_temperature_c'), sample.get('analysis_temperature_c'),
-                sample.get('analysis_temperature_source'), balancing_db, json.dumps(sample.get('cells') or {}),
+                sample.get('analysis_temperature_source'), balancing_db, sample.get('flow_state'),
+                json.dumps(sample.get('cells') or {}),
                 json.dumps(sample.get('plausibility') or []),
             ),
         )
@@ -276,3 +313,17 @@ class Database:
             (cycle_id,),
         ).fetchone()
         return dict(row) if row else {}
+
+    def cycle_samples_for_analysis(self, cycle_id: int) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            '''
+            SELECT ts, vmax, vmin, delta_mv, normalized_dc_charge_power_w,
+                   normalized_dc_charge_current_a, dc_current_source,
+                   analysis_temperature_c, balancing, flow_state
+            FROM samples
+            WHERE cycle_id=?
+            ORDER BY id ASC
+            ''',
+            (cycle_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]

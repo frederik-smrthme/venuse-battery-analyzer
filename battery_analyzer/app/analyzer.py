@@ -255,11 +255,13 @@ class Analyzer:
         self.balancing_active_since: datetime | None = None
         self.balancing_duration_completed_s = 0.0
         self.balancing_session_count = 0
+        self.last_clean_balancing_sample: dict[str, Any] | None = None
         self.ha_connected = False
         self.missing_entities: list[str] = []
         self.missing_optional_entities: list[str] = []
         self.config_warnings = settings.validation_warnings()
         self._restore_open_cycle()
+        self._backfill_recent_cycles()
 
     def _restore_open_cycle(self) -> None:
         row = self.db.get_open_cycle()
@@ -277,6 +279,7 @@ class Analyzer:
         self.balancing_active_since = parse_dt(row.get('balancing_active_since'))
         self.balancing_duration_completed_s = float(row.get('balancing_duration_s') or 0.0)
         self.balancing_session_count = int(row.get('balancing_session_count') or 0)
+        self.last_clean_balancing_sample = self._latest_clean_balancing_sample(self.current_cycle_id)
         quality = row.get('quality_json') or {}
         self.measurement_gaps = bool(quality.get('measurement_gaps'))
         self.charge_resumed = bool(quality.get('charge_resumed'))
@@ -370,6 +373,224 @@ class Analyzer:
             return self.FLOW_DISCHARGING
         return self.FLOW_CONFLICT
 
+    def _classify_stored_flow(self, sample: dict[str, Any]) -> str:
+        stored = sample.get('flow_state')
+        if stored in {
+            self.FLOW_CHARGING,
+            self.FLOW_ZERO,
+            self.FLOW_DISCHARGING,
+            self.FLOW_CONFLICT,
+            self.FLOW_UNKNOWN,
+        }:
+            return str(stored)
+        return self._classify_flow({
+            'normalized_dc_charge_current_a': sample.get('normalized_dc_charge_current_a'),
+            'normalized_dc_charge_power_w': sample.get('normalized_dc_charge_power_w'),
+            'dc_current_source': sample.get('dc_current_source'),
+        })
+
+    def _clean_rest_sample(self, snap: dict[str, Any], flow: str) -> bool:
+        return bool(
+            flow == self.FLOW_ZERO
+            and snap.get('vmax') is not None
+            and snap.get('vmin') is not None
+            and snap.get('delta_mv') is not None
+        )
+
+    def _latest_clean_balancing_sample(self, cycle_id: int | None) -> dict[str, Any] | None:
+        if cycle_id is None:
+            return None
+        latest = None
+        for sample in self.db.cycle_samples_for_analysis(cycle_id):
+            if sample.get('balancing') != 1:
+                continue
+            if self._classify_stored_flow(sample) != self.FLOW_ZERO:
+                continue
+            if sample.get('vmax') is None or sample.get('vmin') is None or sample.get('delta_mv') is None:
+                continue
+            latest = sample
+        return latest
+
+    def _matched_vmax_pair(
+        self,
+        cycle_id: int,
+        charge_stop_at: datetime | None,
+        not_after: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        tolerance_v = self.settings.matched_vmax_tolerance_mv / 1000.0
+        min_elapsed = float(self.settings.matched_min_elapsed_seconds)
+        eligible: list[dict[str, Any]] = []
+        for sample in self.db.cycle_samples_for_analysis(cycle_id):
+            ts = parse_dt(sample.get('ts'))
+            if ts is None:
+                continue
+            if charge_stop_at is not None and ts < charge_stop_at:
+                continue
+            if not_after is not None and ts > not_after:
+                continue
+            if self._classify_stored_flow(sample) != self.FLOW_ZERO:
+                continue
+            if sample.get('vmax') is None or sample.get('delta_mv') is None:
+                continue
+            eligible.append({**sample, '_dt': ts})
+
+        # Work backwards from the latest clean balancing point. This makes the
+        # comparison represent as much of the balancing session as possible instead
+        # of accidentally selecting an early, unchanged pair just because Vmax was
+        # identical there.
+        for cmp_index in range(len(eligible) - 1, -1, -1):
+            cmp = eligible[cmp_index]
+            if cmp.get('balancing') != 1:
+                continue
+
+            best_ref: dict[str, Any] | None = None
+            best_ref_score: tuple[float, float] | None = None
+            for ref in eligible[:cmp_index]:
+                elapsed = (cmp['_dt'] - ref['_dt']).total_seconds()
+                if elapsed < min_elapsed:
+                    continue
+                diff_v = abs(float(ref['vmax']) - float(cmp['vmax']))
+                if diff_v > tolerance_v:
+                    continue
+                # For the chosen late comparison point, match Vmax as closely as
+                # possible. If equally close, prefer the older reference point.
+                score = (-diff_v, elapsed)
+                if best_ref_score is None or score > best_ref_score:
+                    best_ref = ref
+                    best_ref_score = score
+
+            if best_ref is None:
+                continue
+
+            ref_temp = as_float(best_ref.get('analysis_temperature_c'))
+            cmp_temp = as_float(cmp.get('analysis_temperature_c'))
+            diff_v = abs(float(best_ref['vmax']) - float(cmp['vmax']))
+            elapsed = (cmp['_dt'] - best_ref['_dt']).total_seconds()
+            return {
+                'ref_at': iso(best_ref['_dt']),
+                'ref_vmax': float(best_ref['vmax']),
+                'ref_delta_mv': float(best_ref['delta_mv']),
+                'cmp_at': iso(cmp['_dt']),
+                'cmp_vmax': float(cmp['vmax']),
+                'cmp_delta_mv': float(cmp['delta_mv']),
+                'vmax_diff_mv': round(diff_v * 1000.0, 3),
+                'delta_reduction_mv': round(float(best_ref['delta_mv']) - float(cmp['delta_mv']), 3),
+                'elapsed_s': round(elapsed, 3),
+                'temperature_diff_c': (
+                    round(abs(ref_temp - cmp_temp), 3)
+                    if ref_temp is not None and cmp_temp is not None
+                    else None
+                ),
+            }
+        return None
+
+    def _persist_balancing_clean_end(
+        self,
+        sample: dict[str, Any] | None,
+        reason: str,
+    ) -> None:
+        if self.current_cycle_id is None or sample is None:
+            return
+        ts = sample.get('ts')
+        self.db.update_cycle(
+            self.current_cycle_id,
+            balancing_clean_end_at=ts,
+            balancing_clean_end_vmax=sample.get('vmax'),
+            balancing_clean_end_vmin=sample.get('vmin'),
+            balancing_clean_end_delta_mv=sample.get('delta_mv'),
+            balancing_end_reason=reason,
+        )
+
+    def _derive_balancing_end_reason(
+        self,
+        flow: str,
+        clean_sample: dict[str, Any] | None,
+    ) -> str:
+        if flow == self.FLOW_DISCHARGING:
+            return 'interrupted_by_discharge'
+        if flow == self.FLOW_CHARGING:
+            return 'interrupted_by_charge'
+        if flow == self.FLOW_CONFLICT:
+            return 'interrupted_by_flow_conflict'
+        if flow == self.FLOW_UNKNOWN:
+            return 'flag_off_flow_unknown'
+        if clean_sample is not None:
+            return 'flag_off_at_rest'
+        return 'flag_off_without_clean_rest_sample'
+
+    def _backfill_recent_cycles(self, limit: int = 10) -> None:
+        for row in self.db.recent_completed_cycles(limit):
+            if not row.get('balancing_detected'):
+                continue
+            cycle_id = int(row['id'])
+            samples = self.db.cycle_samples_for_analysis(cycle_id)
+            if not samples:
+                continue
+
+            clean_end = None
+            first_nonzero_after_clean = None
+            end_at = parse_dt(row.get('balancing_end_at')) or parse_dt(row.get('ended_at'))
+            for sample in samples:
+                ts = parse_dt(sample.get('ts'))
+                if ts is None or (end_at is not None and ts > end_at):
+                    continue
+                flow = self._classify_stored_flow(sample)
+                if sample.get('balancing') == 1 and flow == self.FLOW_ZERO:
+                    if sample.get('vmax') is not None and sample.get('vmin') is not None and sample.get('delta_mv') is not None:
+                        clean_end = sample
+                        first_nonzero_after_clean = None
+                elif clean_end is not None and sample.get('balancing') == 1 and flow in {
+                    self.FLOW_CHARGING,
+                    self.FLOW_DISCHARGING,
+                    self.FLOW_CONFLICT,
+                } and first_nonzero_after_clean is None:
+                    first_nonzero_after_clean = flow
+
+            fields: dict[str, Any] = {}
+            if row.get('balancing_clean_end_at') is None and clean_end is not None:
+                reason = self._derive_balancing_end_reason(
+                    first_nonzero_after_clean or self.FLOW_ZERO,
+                    clean_end,
+                )
+                fields.update({
+                    'balancing_clean_end_at': clean_end.get('ts'),
+                    'balancing_clean_end_vmax': clean_end.get('vmax'),
+                    'balancing_clean_end_vmin': clean_end.get('vmin'),
+                    'balancing_clean_end_delta_mv': clean_end.get('delta_mv'),
+                    'balancing_end_reason': reason,
+                })
+
+            matched = self._matched_vmax_pair(
+                cycle_id,
+                parse_dt(row.get('charge_stop_at')),
+                parse_dt((fields or {}).get('balancing_clean_end_at') or row.get('balancing_clean_end_at') or row.get('balancing_end_at')),
+            )
+            if matched is not None:
+                quality = dict(row.get('quality_json') or {})
+                valid = not bool(quality.get('measurement_gaps')) and not bool(quality.get('balancing_signal_unknown_seen'))
+                quality.update({
+                    'delta_reduction_valid': valid,
+                    'matched_vmax_comparison': matched,
+                })
+                fields.update({
+                    'matched_ref_at': matched['ref_at'],
+                    'matched_ref_vmax': matched['ref_vmax'],
+                    'matched_ref_delta_mv': matched['ref_delta_mv'],
+                    'matched_cmp_at': matched['cmp_at'],
+                    'matched_cmp_vmax': matched['cmp_vmax'],
+                    'matched_cmp_delta_mv': matched['cmp_delta_mv'],
+                    'matched_vmax_diff_mv': matched['vmax_diff_mv'],
+                    'matched_delta_reduction_mv': matched['delta_reduction_mv'],
+                    'matched_elapsed_s': matched['elapsed_s'],
+                    'matched_temperature_diff_c': matched['temperature_diff_c'],
+                    'matched_vmax_tolerance_mv': self.settings.matched_vmax_tolerance_mv,
+                    'matched_comparison_valid': 1 if valid else 0,
+                    'delta_reduction_mv': matched['delta_reduction_mv'] if valid else None,
+                    'quality_json': quality,
+                })
+            if fields:
+                self.db.update_cycle(cycle_id, **fields)
+
     def _event(self, event_type: str, now: datetime, data: dict[str, Any] | None = None) -> None:
         if self.current_cycle_id is None:
             return
@@ -402,6 +623,7 @@ class Analyzer:
         self.balancing_active_since = None
         self.balancing_duration_completed_s = 0.0
         self.balancing_session_count = 0
+        self.last_clean_balancing_sample = None
         self.current_cycle_id = self.db.create_cycle(iso(now), self.phase, soc)
         self._event('cycle_started', now, {'soc': soc})
         self._write_sample(now, force=True)
@@ -481,6 +703,7 @@ class Analyzer:
         if self.balancing_active_since is not None:
             return
         self.balancing_active_since = now
+        self.last_clean_balancing_sample = None
         self.balancing_session_count += 1
         if self.balancing_first_start_at is None:
             self.balancing_first_start_at = now
@@ -494,13 +717,20 @@ class Analyzer:
             )
         self._event('balancing_start', now, self.live.snapshot(self.settings, self.phase, now))
 
-    def _mark_balancing_end(self, now: datetime) -> None:
+    def _mark_balancing_end(self, now: datetime, snap: dict[str, Any], flow: str) -> None:
         if self.balancing_active_since is None:
             return
         seconds = max(0.0, (now - self.balancing_active_since).total_seconds())
         self.balancing_duration_completed_s += seconds
         self.balancing_active_since = None
         self.balancing_last_end_at = now
+        clean_end = None
+        if self._clean_rest_sample(snap, flow):
+            clean_end = {**snap, 'flow_state': flow}
+        elif self.last_clean_balancing_sample is not None:
+            clean_end = self.last_clean_balancing_sample
+        end_reason = self._derive_balancing_end_reason(flow, clean_end)
+        self._persist_balancing_clean_end(clean_end, end_reason)
         if self.current_cycle_id is not None:
             self.db.update_cycle(
                 self.current_cycle_id,
@@ -512,7 +742,9 @@ class Analyzer:
         self._event('balancing_end', now, {
             'session_duration_s': round(seconds, 3),
             'total_duration_s': round(self.balancing_duration_completed_s, 3),
-            'snapshot': self.live.snapshot(self.settings, self.phase, now),
+            'reason': end_reason,
+            'snapshot': snap,
+            'clean_end_snapshot': clean_end,
         })
 
     def _balancing_duration(self, now: datetime) -> float:
@@ -528,6 +760,7 @@ class Analyzer:
             if (now - self.last_sample_at).total_seconds() < self.settings.sample_interval_seconds:
                 return
         snap = self.live.snapshot(self.settings, self.phase, now)
+        snap['flow_state'] = self._classify_flow(snap)
         if snap.get('plausibility'):
             self.invalid_sample_count += 1
         vmax = snap.get('vmax')
@@ -547,24 +780,32 @@ class Analyzer:
         if self.balancing_active_since is not None:
             # We do not invent an OFF event; simply account the observed active time up to cycle end.
             self.balancing_duration_completed_s = self._balancing_duration(now)
+            self._persist_balancing_clean_end(
+                self.last_clean_balancing_sample,
+                'cycle_ended_while_balancing',
+            )
 
         snap = self.live.snapshot(self.settings, self.phase, now)
+        snap['flow_state'] = self._classify_flow(snap)
         row = self.db.get_cycle(self.current_cycle_id)
         delta_start = row.get('delta_charge_stop_mv') if row else None
         delta_end = snap.get('delta_mv')
         raw_delta_change = None
         if delta_start is not None and delta_end is not None:
             raw_delta_change = round(delta_start - delta_end, 3)
-        delta_reduction_valid = bool(
-            raw_delta_change is not None
-            and self.charge_stop_at is not None
-            and not self.charge_resumed
-            and not self.measurement_gaps
-            and not self.post_stop_nonzero_flow_seen
-            and not self.signal_conflict_seen
-            and reason == 'post_charge_timeout'
+        current_row = self.db.get_cycle(self.current_cycle_id) or row or {}
+        clean_end_at = parse_dt(current_row.get('balancing_clean_end_at'))
+        matched = self._matched_vmax_pair(
+            self.current_cycle_id,
+            self.charge_stop_at,
+            clean_end_at or self.balancing_last_end_at or now,
         )
-        reduction = raw_delta_change if delta_reduction_valid else None
+        delta_reduction_valid = bool(
+            matched is not None
+            and not self.measurement_gaps
+            and not self.balancing_signal_unknown_seen
+        )
+        reduction = matched.get('delta_reduction_mv') if matched is not None and delta_reduction_valid else None
 
         cell_calc = snap.get('cell_calculated') or {}
         quality = {
@@ -579,6 +820,8 @@ class Analyzer:
             'post_stop_nonzero_flow_seen': self.post_stop_nonzero_flow_seen,
             'delta_reduction_valid': delta_reduction_valid,
             'raw_delta_change_mv': raw_delta_change,
+            'matched_vmax_comparison': matched,
+            'matched_vmax_tolerance_mv': self.settings.matched_vmax_tolerance_mv,
             'invalid_sample_count': self.invalid_sample_count,
             'individual_cell_data_available': bool(self.live.cells),
             'individual_cell_data_complete': bool(cell_calc.get('complete')),
@@ -598,6 +841,18 @@ class Analyzer:
             vmin_end=snap.get('vmin'),
             delta_end_mv=delta_end,
             delta_reduction_mv=reduction,
+            matched_ref_at=matched.get('ref_at') if matched else None,
+            matched_ref_vmax=matched.get('ref_vmax') if matched else None,
+            matched_ref_delta_mv=matched.get('ref_delta_mv') if matched else None,
+            matched_cmp_at=matched.get('cmp_at') if matched else None,
+            matched_cmp_vmax=matched.get('cmp_vmax') if matched else None,
+            matched_cmp_delta_mv=matched.get('cmp_delta_mv') if matched else None,
+            matched_vmax_diff_mv=matched.get('vmax_diff_mv') if matched else None,
+            matched_delta_reduction_mv=matched.get('delta_reduction_mv') if matched else None,
+            matched_elapsed_s=matched.get('elapsed_s') if matched else None,
+            matched_temperature_diff_c=matched.get('temperature_diff_c') if matched else None,
+            matched_vmax_tolerance_mv=self.settings.matched_vmax_tolerance_mv,
+            matched_comparison_valid=1 if delta_reduction_valid else 0,
             max_vmax=self.max_vmax,
             min_vmin=self.min_vmin,
             balancing_duration_s=round(self.balancing_duration_completed_s, 3),
@@ -625,6 +880,7 @@ class Analyzer:
         self.balancing_active_since = None
         self.balancing_duration_completed_s = 0.0
         self.balancing_session_count = 0
+        self.last_clean_balancing_sample = None
         self.measurement_gaps = False
         self.charge_resumed = False
         self.signal_conflict_seen = False
@@ -742,8 +998,10 @@ class Analyzer:
         # Balancing is deliberately orthogonal to charge/rest phase.
         if balancing is True:
             self._mark_balancing_start(now)
+            if self._clean_rest_sample(snap, flow):
+                self.last_clean_balancing_sample = {**snap, 'flow_state': flow}
         elif balancing is False:
-            self._mark_balancing_end(now)
+            self._mark_balancing_end(now, snap, flow)
         # balancing is None means unknown/unavailable: do not invent an OFF edge.
 
         # If the analyzer was started in the middle of an already-running balancing session,
@@ -806,8 +1064,8 @@ class Analyzer:
         else:
             cell_source = 'partial_individual'
         return {
-            'version': __import__('os').environ.get('APP_VERSION', '0.1.4'),
-            'schema_version': 2,
+            'version': __import__('os').environ.get('APP_VERSION', '0.1.5'),
+            'schema_version': 3,
             'phase': self.phase,
             'analysis_state': analysis_state,
             'analysis_active': self.current_cycle_id is not None,

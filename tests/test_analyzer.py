@@ -100,9 +100,11 @@ class AnalyzerTestCase(unittest.TestCase):
     def test_balancing_duration_accumulates_multiple_sessions(self):
         self.begin_charge()
         self.analyzer._mark_balancing_start(BASE + timedelta(seconds=10))
-        self.analyzer._mark_balancing_end(BASE + timedelta(seconds=20))
+        snap = self.analyzer.live.snapshot(self.settings, self.analyzer.phase, BASE + timedelta(seconds=20))
+        self.analyzer._mark_balancing_end(BASE + timedelta(seconds=20), snap, Analyzer.FLOW_CHARGING)
         self.analyzer._mark_balancing_start(BASE + timedelta(seconds=30))
-        self.analyzer._mark_balancing_end(BASE + timedelta(seconds=50))
+        snap = self.analyzer.live.snapshot(self.settings, self.analyzer.phase, BASE + timedelta(seconds=50))
+        self.analyzer._mark_balancing_end(BASE + timedelta(seconds=50), snap, Analyzer.FLOW_CHARGING)
         self.assertAlmostEqual(self.analyzer._balancing_duration(BASE + timedelta(seconds=60)), 30.0)
         row = self.db.get_cycle(self.analyzer.current_cycle_id)
         self.assertAlmostEqual(row['balancing_duration_s'], 30.0)
@@ -224,7 +226,7 @@ class AnalyzerTestCase(unittest.TestCase):
         snap = self.analyzer.live.snapshot(self.settings, Analyzer.PHASE_NORMAL, BASE)
         self.assertEqual(self.analyzer._classify_flow(snap), Analyzer.FLOW_CONFLICT)
 
-    def test_clean_post_charge_cycle_publishes_delta_reduction(self):
+    def test_post_charge_without_balancing_does_not_publish_balancing_delta_reduction(self):
         self.settings.post_charge_observation_minutes = 2
         self.begin_charge()
         self.set_values(soc=99.5, vmax=3.52, vmin=3.40)
@@ -240,8 +242,114 @@ class AnalyzerTestCase(unittest.TestCase):
         self.analyzer.evaluate(stop_at + timedelta(seconds=120))
         last = self.analyzer.status()['last_cycle']
         self.assertIsNotNone(last)
-        self.assertAlmostEqual(last['delta_reduction_mv'], 20.0)
+        self.assertIsNone(last['delta_reduction_mv'])
+        self.assertFalse(last['quality_json']['delta_reduction_valid'])
+
+    def test_balancing_end_uses_last_clean_rest_sample_before_discharge(self):
+        self.settings.post_charge_observation_minutes = 10
+        self.begin_charge()
+        self.set_values(soc=100, vmax=3.59, vmin=3.399)
+        self.analyzer.evaluate(BASE + timedelta(seconds=10))
+
+        stop_at = BASE + timedelta(seconds=20)
+        self.set_values(dc_power=0, dc_current=0, balancing='off', vmax=3.56, vmin=3.40)
+        self.analyzer.evaluate(stop_at)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=30))
+
+        # Balancing starts at rest. The last clean point before discharge is 126 mV.
+        self.set_values(balancing='on', vmax=3.526, vmin=3.400)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=60))
+        self.analyzer.evaluate(stop_at + timedelta(seconds=120))
+
+        # Discharge starts while the BMS flag still says balancing. Voltage delta collapses,
+        # but this point must not be used as the balancing end value.
+        self.set_values(dc_power=-300, dc_current=-5.5, vmax=3.442, vmin=3.400)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=125))
+        self.set_values(balancing='off')
+        self.analyzer.evaluate(stop_at + timedelta(seconds=130))
+
+        row = self.db.get_cycle(self.analyzer.current_cycle_id)
+        self.assertAlmostEqual(row['balancing_clean_end_delta_mv'], 126.0)
+        self.assertAlmostEqual(row['balancing_clean_end_vmax'], 3.526)
+        self.assertEqual(row['balancing_end_reason'], 'interrupted_by_discharge')
+
+    def test_matched_vmax_comparison_uses_only_zero_flow_points(self):
+        self.settings.post_charge_observation_minutes = 5
+        self.settings.matched_vmax_tolerance_mv = 5.0
+        self.settings.matched_min_elapsed_seconds = 60
+        self.begin_charge()
+        self.set_values(soc=100, vmax=3.55, vmin=3.40)
+        self.analyzer.evaluate(BASE + timedelta(seconds=10))
+
+        stop_at = BASE + timedelta(seconds=20)
+        self.set_values(dc_power=0, dc_current=0, balancing='off', vmax=3.505, vmin=3.400)
+        self.analyzer.evaluate(stop_at)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=30))
+
+        # Clean reference at 3.505 V / 105 mV.
+        self.set_values(balancing='on')
+        self.analyzer.evaluate(stop_at + timedelta(seconds=60))
+
+        # A much smaller delta under discharge must be ignored despite similar Vmax.
+        self.set_values(dc_power=-200, dc_current=-3.7, vmax=3.503, vmin=3.450)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=90))
+
+        # Return to rest with nearly the same Vmax and a genuine 80 mV delta.
+        self.set_values(dc_power=0, dc_current=0, vmax=3.502, vmin=3.422)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=130))
+        self.set_values(balancing='off')
+        self.analyzer.evaluate(stop_at + timedelta(seconds=140))
+
+        # End the cycle manually so matched metrics are finalized.
+        self.analyzer._finish_cycle(stop_at + timedelta(seconds=150), 'test_end')
+        last = self.analyzer.status()['last_cycle']
         self.assertTrue(last['quality_json']['delta_reduction_valid'])
+        self.assertAlmostEqual(last['matched_vmax_diff_mv'], 3.0)
+        self.assertAlmostEqual(last['matched_delta_reduction_mv'], 25.0)
+        self.assertAlmostEqual(last['delta_reduction_mv'], 25.0)
+
+    def test_recent_v014_cycle_is_backfilled_with_clean_balancing_end(self):
+        self.settings.post_charge_observation_minutes = 10
+        self.begin_charge()
+        self.set_values(soc=100, vmax=3.59, vmin=3.399)
+        self.analyzer.evaluate(BASE + timedelta(seconds=10))
+
+        stop_at = BASE + timedelta(seconds=20)
+        self.set_values(dc_power=0, dc_current=0, balancing='off', vmax=3.56, vmin=3.40)
+        self.analyzer.evaluate(stop_at)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=30))
+        self.set_values(balancing='on', vmax=3.526, vmin=3.400)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=60))
+        self.analyzer.evaluate(stop_at + timedelta(seconds=120))
+        self.set_values(dc_power=-300, dc_current=-5.5, vmax=3.442, vmin=3.400)
+        self.analyzer.evaluate(stop_at + timedelta(seconds=125))
+        self.set_values(balancing='off')
+        self.analyzer.evaluate(stop_at + timedelta(seconds=130))
+        self.analyzer._finish_cycle(stop_at + timedelta(seconds=140), 'test_end')
+        cycle_id = self.analyzer.status()['last_cycle']['id']
+
+        # Mimic a v0.1.4 database: samples exist, but clean-end metadata and stored
+        # flow_state were not available yet.
+        self.db.conn.execute(
+            '''
+            UPDATE cycles
+            SET balancing_clean_end_at=NULL,
+                balancing_clean_end_vmax=NULL,
+                balancing_clean_end_vmin=NULL,
+                balancing_clean_end_delta_mv=NULL,
+                balancing_end_reason=NULL
+            WHERE id=?
+            ''',
+            (cycle_id,),
+        )
+        self.db.conn.execute('UPDATE samples SET flow_state=NULL WHERE cycle_id=?', (cycle_id,))
+        self.db.conn.commit()
+
+        Analyzer(self.settings, self.db)
+        row = self.db.get_cycle(cycle_id)
+        self.assertAlmostEqual(row['balancing_clean_end_delta_mv'], 126.0)
+        self.assertAlmostEqual(row['balancing_clean_end_vmax'], 3.526)
+        self.assertEqual(row['balancing_end_reason'], 'interrupted_by_discharge')
 
     def test_post_stop_current_invalidates_delta_reduction(self):
         self.settings.post_charge_observation_minutes = 2

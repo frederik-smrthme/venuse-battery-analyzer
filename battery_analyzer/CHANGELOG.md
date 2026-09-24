@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.5
+
+- Preserve the last clean zero-series-current sample as balancing end when balancing is interrupted by charging/discharging.
+- Store balancing clean-end Vmax/Vmin/delta and interruption reason separately from the raw cycle-end values.
+- Add matched-Vmax delta comparison using only zero-series-current samples (default Vmax tolerance: 5 mV).
+- Delta reduction is now published only from a valid matched-Vmax comparison; arbitrary start/end voltage deltas are retained only as raw diagnostics.
+- Recharging after an earlier charge stop no longer invalidates the entire cycle.
+- Backfill clean balancing-end and matched-Vmax fields for recent completed cycles where the stored sample history permits reconstruction.
+- Add Home Assistant entities for clean balancing end and matched-Vmax comparison results.
+- Database schema extended with flow-state and comparison metadata.
+- 26 unit tests.
+
 ## 0.1.4
 
 - Make DC current, AC current and battery-temperature entities optional.

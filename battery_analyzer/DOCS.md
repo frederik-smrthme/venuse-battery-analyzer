@@ -27,7 +27,11 @@ The app exposes a read-only JSON API on port 8099 by default:
 The app does not alter charging or battery control settings. It is observation-only.
 
 
-## Important v0.1.4 behavior
+## Important v0.1.5 behavior
+
+- The balancing endpoint is the last valid zero-series-current sample before balancing is interrupted by charge/discharge, not the first voltage sample after current starts flowing.
+- Quantitative delta reduction uses a matched-Vmax comparison: both points must be at zero series current, the later point must be observed during balancing, and Vmax must match within `matched_vmax_tolerance_mv` (default 5 mV).
+- If no suitable matched pair exists, delta reduction remains unavailable rather than publishing a misleading number.
 
 - Charge-stop time is the start of the stable-zero window; confirmation occurs after the configured stability interval.
 - Balancing is an independent signal and may span multiple ON/OFF sessions in one cycle.

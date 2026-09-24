@@ -32,6 +32,8 @@ class Settings:
     post_charge_observation_minutes: int = 240
     max_cycle_hours: int = 24
     sample_interval_seconds: int = 5
+    matched_vmax_tolerance_mv: float = 5.0
+    matched_min_elapsed_seconds: int = 60
     cell_voltage_min_v: float = 2.0
     cell_voltage_max_v: float = 3.8
     pack_voltage_tolerance_v: float = 0.75
@@ -146,6 +148,10 @@ class Settings:
             warnings.append('cycle_end_below_soc should be lower than observation_soc')
         if self.cell_voltage_min_v >= self.cell_voltage_max_v:
             warnings.append('cell_voltage_min_v must be lower than cell_voltage_max_v')
+        if self.matched_vmax_tolerance_mv <= 0:
+            warnings.append('matched_vmax_tolerance_mv must be greater than zero')
+        if self.matched_min_elapsed_seconds < 1:
+            warnings.append('matched_min_elapsed_seconds must be at least 1 second')
         expected_nominal = self.battery_cell_count * 3.2
         if expected_nominal > 0:
             mismatch = abs(self.battery_nominal_voltage_v - expected_nominal) / expected_nominal

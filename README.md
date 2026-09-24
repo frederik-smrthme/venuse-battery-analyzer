@@ -2,7 +2,7 @@
 
 A local Home Assistant analyzer for **Marstek Venus E / LFP batteries**. The project observes the upper charging range, charge stop, relaxation and BMS balancing behavior and exposes the analysis as native Home Assistant entities.
 
-> **Development status:** v0.1.4 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
+> **Development status:** v0.1.5 – observation only. The analyzer does **not** write to battery control entities and does not change charging behavior.
 
 ## What it is for
 
@@ -13,7 +13,7 @@ The analyzer is intended to build a reliable long-term picture of battery behavi
 - charge-stop detection
 - relaxation after charging
 - BMS balancing flag detection
-- balancing duration and delta reduction
+- balancing duration, last clean rest point before interruption, and matched-Vmax delta comparison
 - AC/DC charging conditions before charge stop
 - comparison of cycles with and without active balancing
 - future estimation of balancing current
@@ -83,7 +83,7 @@ BALANCING is tracked independently as an ON/OFF signal and may overlap REST or P
 Cycles without a balancing flag are intentionally retained because they provide a useful reference for natural LFP relaxation.
 
 
-## v0.1.4 validation and plausibility safeguards
+## v0.1.5 validation and plausibility safeguards
 
 Before the first live test the analyzer was hardened with the following checks:
 
@@ -93,8 +93,10 @@ Before the first live test the analyzer was hardened with the following checks:
 - a high-SoC battery sitting idle — even with a high Vmax — does not create a false observation cycle
 - DC current is optional; when absent it is derived from DC power / pack voltage and tagged as calculated
 - directly measured DC current and DC power are cross-checked; contradictory flow directions are flagged instead of silently interpreted
-- non-zero series current during balancing or after charge stop is flagged so delta-based estimates are not treated as clean measurements
-- a cycle-level delta reduction is only published when the post-charge observation stayed uncontaminated by subsequent current flow
+- non-zero series current during balancing or after charge stop is flagged and is never used as a clean balancing endpoint
+- if balancing is interrupted by charging/discharging, the analyzer preserves the **last zero-series-current sample before the interruption** as the balancing end reference
+- delta reduction is only published from two **zero-series-current** samples whose Vmax values match within the configured tolerance (default ±5 mV)
+- recharging after an earlier charge stop no longer invalidates the whole cycle; the latest stable stop and clean matched samples are used instead
 - LFP cell values below 3.0 V remain valid; the configured upper plausibility limit defaults to 3.8 V
 - pack voltage is checked against the possible envelope from Vmin/Vmax and, later, against the sum of all individual cells
 - battery voltage is stored explicitly for later capacity / SoH work
@@ -227,7 +229,7 @@ The currently reported Marstek `Vmin` and `Vmax` can then remain as independent 
 
 ## Planned analysis extensions
 
-Not yet implemented in v0.1.4:
+Not yet implemented in v0.1.5:
 
 - InfluxDB history and replay adapter
 - robust slope calculation / regression over time windows
@@ -250,7 +252,7 @@ The analyzer is intentionally event-driven and lightweight for a Raspberry Pi 4 
 
 ## Safety
 
-Version 0.1.4 is strictly **read-only / observation-only**. It does not control charging, discharging, force mode, power limits or BMS settings.
+Version 0.1.5 is strictly **read-only / observation-only**. It does not control charging, discharging, force mode, power limits or BMS settings.
 
 ## Repository structure
 

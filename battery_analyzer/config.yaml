@@ -1,6 +1,6 @@
 name: "Marstek Battery Analyzer"
 description: "Local LFP top-charge and balancing cycle analyzer for Home Assistant"
-version: "0.1.4"
+version: "0.1.5"
 slug: "marstek_battery_analyzer"
 url: "https://github.com/frederik-smrthme/venuse-battery-analyzer"
 init: false
@@ -25,6 +25,8 @@ options:
   post_charge_observation_minutes: 240
   max_cycle_hours: 24
   sample_interval_seconds: 5
+  matched_vmax_tolerance_mv: 5.0
+  matched_min_elapsed_seconds: 60
   cell_voltage_min_v: 2.0
   cell_voltage_max_v: 3.8
   pack_voltage_tolerance_v: 0.75
@@ -61,6 +63,8 @@ schema:
   post_charge_observation_minutes: int(5,1440)
   max_cycle_hours: int(1,168)
   sample_interval_seconds: int(1,60)
+  matched_vmax_tolerance_mv: float(0.1,50)
+  matched_min_elapsed_seconds: int(1,3600)
   cell_voltage_min_v: float(2.0,3.5)
   cell_voltage_max_v: float(3.3,3.8)
   pack_voltage_tolerance_v: float(0,5)

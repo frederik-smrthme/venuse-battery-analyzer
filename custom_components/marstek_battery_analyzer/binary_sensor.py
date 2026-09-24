@@ -43,6 +43,11 @@ DESCRIPTIONS = (
         name='Last delta reduction valid',
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    BinarySensorEntityDescription(
+        key='last_matched_vmax_valid',
+        name='Last matched Vmax comparison valid',
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
 )
 
 
@@ -82,5 +87,8 @@ class AnalyzerBinarySensor(AnalyzerEntity, BinarySensorEntity):
             return bool(diagnostics.get('balancing_signal_unknown_seen'))
         if key == 'last_delta_reduction_valid':
             value = last_quality.get('delta_reduction_valid')
+            return None if value is None else bool(value)
+        if key == 'last_matched_vmax_valid':
+            value = (data.get('last_cycle') or {}).get('matched_comparison_valid')
             return None if value is None else bool(value)
         return None

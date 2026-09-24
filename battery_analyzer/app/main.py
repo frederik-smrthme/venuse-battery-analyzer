@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from aiohttp import web
 
@@ -40,6 +41,7 @@ async def main() -> None:
     await site.start()
 
     LOGGER.info('REST API listening on port %s', settings.api_port)
+    LOGGER.info('Marstek Battery Analyzer version %s', os.environ.get('APP_VERSION', '0.1.5'))
     LOGGER.info(
         'Battery config: %s cells, %.2f kWh gross, %.1f Ah, %.1f%% DoD',
         settings.battery_cell_count,
